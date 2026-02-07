@@ -6,12 +6,9 @@ Refactored to strictly follow ArmorIQ MCP Specification.
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any, Optional
-
-from fastapi import FastAPI, HTTPException, Header, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
+import os
+from jose import jwt, JWTError
 import logging
 
 # Standard Logging Setup
@@ -50,16 +47,59 @@ class ExecuteRequest(BaseModel):
 
 # --- Dependencies ---
 
-def verify_armoriq_token(intent_token: str):
+ARMORIQ_SECRET = os.getenv("ARMORIQ_SECRET", "demo-secret-key-12345")
+# Simple in-memory set to prevent token reuse during the demo
+USED_TOKENS: Set[str] = set()
+
+def verify_armoriq_token(intent_token: str, tool_name: str, parameters: Dict[str, Any], user_email: Optional[str] = None):
     """
-    Simulates validation of the ArmorIQ Intent Token.
-    In a real scenario, this would verify the JWT signature and claims.
+    Validates the ArmorIQ Intent Token against the requested action and parameters.
     """
-    if not intent_token or intent_token == "invalid-token":
-         # Simple check for demo/test purposes
-         # Real validation would check issuer, audience, and signature
-         return False
-    return True
+    try:
+        payload = jwt.decode(intent_token, ARMORIQ_SECRET, algorithms=["HS256"])
+
+        # 1. Check expiration (handled by jwt.decode)
+
+        # 2. Prevent Token Reuse
+        jti = payload.get("jti")
+        if not jti or jti in USED_TOKENS:
+            logger.warning(f"Token reuse or missing JTI: {jti}")
+            return False
+        USED_TOKENS.add(jti)
+
+        # 3. Prevent User Impersonation
+        if user_email and payload.get("sub") != user_email:
+            logger.warning(f"User mismatch: {user_email} vs {payload.get('sub')}")
+            return False
+
+        # 4. Check Action Binding
+        allowed_actions = payload.get("actions", [])
+        is_authorized = False
+
+        for allowed in allowed_actions:
+            if allowed.get("action") == tool_name:
+                # Basic parameter check - ensure requested params match or are a subset of allowed
+                allowed_params = allowed.get("params", {})
+
+                # Check if all required parameters match
+                match = True
+                for k, v in allowed_params.items():
+                    if parameters.get(k) != v:
+                        match = False
+                        break
+
+                if match:
+                    is_authorized = True
+                    break
+
+        if not is_authorized:
+            logger.warning(f"Action {tool_name} not authorized in token")
+            return False
+
+        return True
+    except JWTError as e:
+        logger.error(f"JWT Verification failed: {e}")
+        return False
 
 # --- MCP Endpoints ---
 
@@ -86,19 +126,19 @@ def list_tools():
     }
 
 @app.post("/mcp/tools/execute")
-def execute_tool(req: ExecuteRequest):
+def execute_tool(req: ExecuteRequest, x_armoriq_user_email: Optional[str] = Header(None)):
     """
     Executes a tool.
     Strictly token-gated by ArmorIQ intent_token.
     """
-    # 1. Validate Token
+    # 1. Validate Token & Binding
     if not req.intent_token:
         logger.warning("Execute attempt without intent token")
         raise HTTPException(status_code=401, detail="Missing ArmorIQ Intent Token")
         
-    if not verify_armoriq_token(req.intent_token):
-        logger.warning(f"Invalid intent token: {req.intent_token}")
-        raise HTTPException(status_code=403, detail="Invalid ArmorIQ Intent Token")
+    if not verify_armoriq_token(req.intent_token, req.tool_name, req.parameters, x_armoriq_user_email):
+        logger.warning(f"Unauthorized or invalid intent token for {req.tool_name}")
+        raise HTTPException(status_code=403, detail="Invalid or unauthorized ArmorIQ Intent Token")
 
     # 2. Lookup Tool
     tool_func = registry.get_tool(req.tool_name)

@@ -3,12 +3,18 @@ import json
 import logging
 import dotenv
 import requests
-from typing import Dict, Any
+from typing import Dict, Any, List
+from jose import jwt
+from datetime import datetime, timedelta
+import uuid
 
 dotenv.load_dotenv()
 
 # Logger
 logger = logging.getLogger("armoriq")
+
+# Shared secret for demo purposes. In production, this would be a public key or ArmorIQ-managed.
+ARMORIQ_SECRET = os.getenv("ARMORIQ_SECRET", "demo-secret-key-12345")
 
 class ArmorIQGateway:
     def __init__(self):
@@ -16,9 +22,14 @@ class ArmorIQGateway:
         self.client = None
         
         if not self.use_mock:
-            self._init_real_client()
-        else:
-            logger.info("⚠️ ArmorIQ Gateway running in MOCK mode.")
+            try:
+                self._init_real_client()
+            except ValueError as e:
+                logger.warning(f"Failed to init real client: {e}. Falling back to SECURE MOCK.")
+                self.use_mock = True
+
+        if self.use_mock:
+            logger.info("⚠️ ArmorIQ Gateway running in SECURE MOCK mode (Signed Tokens).")
 
     def _init_real_client(self):
         # ArmorIQ Configuration
@@ -42,14 +53,15 @@ class ArmorIQGateway:
         )
         logger.info("✅ ArmorIQ SDK initialized.")
 
-    def capture_plan(self, llm: str, prompt: str, plan: Dict[str, Any]) -> str:
+    def capture_plan(self, llm: str, prompt: str, plan: Dict[str, Any]) -> Any:
         """
         Captures the generated plan with ArmorIQ.
         Returns a plan reference ID (or the plan object itself, depending on SDK).
         """
         if self.use_mock:
             logger.info(f"[MOCK] Capturing plan from {llm}")
-            return "mock-plan-id-123"
+            # In mock mode, we return the plan wrapped so get_intent_token can bind it
+            return {"plan_id": "mock-plan-id-123", "plan": plan}
         
         return self.client.capture_plan(
             llm=llm,
@@ -60,10 +72,32 @@ class ArmorIQGateway:
     def get_intent_token(self, captured_plan: Any) -> str:
         """
         Obtains an intent token for the captured plan.
+        In mock mode, it generates a cryptographically signed JWT.
         """
         if self.use_mock:
-            logger.info("[MOCK] Requesting intent token...")
-            return "mock-intent-token-xyz"
+            logger.info("[MOCK] Issuing signed intent token...")
+
+            # Extract allowed actions from the plan for binding
+            allowed_actions = []
+            if isinstance(captured_plan, dict) and "plan" in captured_plan:
+                steps = captured_plan["plan"].get("steps", [])
+                for step in steps:
+                    allowed_actions.append({
+                        "action": step.get("action"),
+                        "params": step.get("params")
+                    })
+
+            payload = {
+                "sub": "admin_agent", # Matches BOT_USER in keycloak.py
+                "iat": datetime.utcnow(),
+                "exp": datetime.utcnow() + timedelta(minutes=10),
+                "jti": str(uuid.uuid4()),
+                "actions": allowed_actions,
+                "iss": "armoriq-mock-authority"
+            }
+
+            token = jwt.encode(payload, ARMORIQ_SECRET, algorithm="HS256")
+            return token
 
         return self.client.get_intent_token(captured_plan)
 
