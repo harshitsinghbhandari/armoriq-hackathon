@@ -76,5 +76,8 @@ graph TD
 *   **Governance:** Custom Policy Engine
 
 ## Team
-*   [Participant Name] - [Role]
-*   [Participant Name] - [Role]
+*  Arhan Khade
+*  Adit Prabhu
+*  Atharv Shetwe
+*  Harshit Singh Bhandari
+
