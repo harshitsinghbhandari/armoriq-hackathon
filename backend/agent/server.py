@@ -112,7 +112,7 @@ def run_agent(request: RunRequest):
                 action=action,
                 intent_token=intent_token,
                 params=params,
-                user_email="agent-runner"
+                user_email="admin_agent"
             )
             results.append({"action": action, "status": "success", "output": res})
         except Exception as e:

@@ -1,5 +1,12 @@
 {
-  "audit_log": [],
+  "audit_log": [
+    {
+      "action": "infra.restart",
+      "target": "payments",
+      "by": "admin_agent",
+      "timestamp": "2026-02-07T17:47:21.854117"
+    }
+  ],
   "locked_accounts": [],
   "keys": {
     "api_key_v1": "active"

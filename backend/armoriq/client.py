@@ -4,6 +4,9 @@ import sys
 import logging
 import dotenv
 import requests
+import uuid
+from datetime import datetime, timedelta
+from jose import jwt
 from typing import Dict, Any
 
 dotenv.load_dotenv()
@@ -64,7 +67,7 @@ class ArmorIQGateway:
         """
         if self.use_mock:
             logger.info(f"[MOCK] Capturing plan from {llm}")
-            return "mock-plan-id-123"
+            return {"plan_id": "mock-plan-id-123", "plan": plan}
         
         try:
             return self.client.capture_plan(

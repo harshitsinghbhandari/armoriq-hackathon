@@ -53,5 +53,60 @@
     "id": "alert_5",
     "created_at": "2026-02-07T22:15:49.009186",
     "resolved": false
+  },
+  {
+    "type": "service",
+    "msg": "Service payments is DOWN",
+    "severity": "critical",
+    "status": "open",
+    "resource_id": "payments",
+    "created_by": "simulator",
+    "id": "alert_6",
+    "created_at": "2026-02-07T17:45:31.841096",
+    "resolved": false
+  },
+  {
+    "type": "service",
+    "msg": "Service payments is DOWN",
+    "severity": "critical",
+    "status": "open",
+    "resource_id": "payments",
+    "created_by": "simulator",
+    "id": "alert_7",
+    "created_at": "2026-02-07T17:45:55.078316",
+    "resolved": false
+  },
+  {
+    "type": "service",
+    "msg": "Service payments is DOWN",
+    "severity": "critical",
+    "status": "open",
+    "resource_id": "payments",
+    "created_by": "simulator",
+    "id": "alert_8",
+    "created_at": "2026-02-07T17:46:18.632074",
+    "resolved": false
+  },
+  {
+    "type": "service",
+    "msg": "Service payments is DOWN",
+    "severity": "critical",
+    "status": "open",
+    "resource_id": "payments",
+    "created_by": "simulator",
+    "id": "alert_9",
+    "created_at": "2026-02-07T17:46:44.240235",
+    "resolved": false
+  },
+  {
+    "type": "service",
+    "msg": "Service payments is DOWN",
+    "severity": "critical",
+    "status": "open",
+    "resource_id": "payments",
+    "created_by": "simulator",
+    "id": "alert_10",
+    "created_at": "2026-02-07T17:47:20.797596",
+    "resolved": false
   }
 ]
