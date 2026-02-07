@@ -12,7 +12,7 @@ from system.state import state
 from system.logger import log_action
 from policy.engine import allow
 from fastapi import Depends
-from auth import get_current_user
+from auth.server import get_current_user
 
 router = APIRouter(prefix="/mcp/alerts", tags=["alerts"])
 

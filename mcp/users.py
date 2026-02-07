@@ -4,7 +4,7 @@ Handles user management operations.
 """
 
 from fastapi import APIRouter, HTTPException, Depends
-from auth import get_current_user
+from auth.server import get_current_user
 from pydantic import BaseModel
 from typing import Literal
 
