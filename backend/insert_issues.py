@@ -103,13 +103,14 @@ def degrade_service(token, service_id):
         print(f"❌ Failed to degrade service: {resp.text}")
 
 def reset_system(token):
-    """Resolve all alerts and ensure services are running."""
+    """Resolve all alerts and ensure services are running via MCP Execute."""
     print("🔄 Resetting system...")
     
     headers = get_headers(token)
+    # Simulator token for reset
+    sim_token = "simulation-reset-token"
 
     # 1. Resolve all open alerts
-    # Need to fetch all open alerts first
     try:
         alerts_resp = requests.get(f"{MCP_BASE_URL}/mcp/alerts/?status=open", headers=headers)
         alerts_resp.raise_for_status()
@@ -117,19 +118,25 @@ def reset_system(token):
         print(f"  - Found {len(alerts)} open alerts.")
         
         for alert in alerts:
-            res_payload = {
-                "agent_id": ADMIN_USER,
-                "alert_id": alert["id"],
-                "resolution_note": "System Reset"
+            # Use MCP Execute
+            payload = {
+                "tool_name": "alert.resolve",
+                "parameters": {
+                    "alert_id": alert["id"],
+                    "resolution_note": "System Reset via InsertIssues"
+                },
+                "intent_token": sim_token
             }
-            requests.post(f"{MCP_BASE_URL}/mcp/alerts/resolve", json=res_payload, headers=headers)
+            res = requests.post(f"{MCP_BASE_URL}/mcp/tools/execute", json=payload, headers=headers)
+            if res.status_code == 200:
+                 print(f"  - Resolved {alert['id']}")
+            else:
+                 print(f"  ❌ Failed to resolve {alert['id']}: {res.text}")
         
-        print("  ✅ All alerts resolved.")
     except Exception as e:
         print(f"  ❌ Failed to fetch/resolve alerts: {e}")
 
     # 2. Restart all services if not running
-    # Note: Using '/list' endpoint from previous agent_basic analysis
     try:
         services_resp = requests.get(f"{MCP_BASE_URL}/mcp/infra/list", headers=headers)
         services_resp.raise_for_status()
@@ -137,12 +144,19 @@ def reset_system(token):
         
         for svc in services:
             if svc.get("status") != "running":
-                restart_payload = {
-                    "agent_id": ADMIN_USER,
-                    "service_id": svc["id"]
+                payload = {
+                    "tool_name": "infra.restart",
+                    "parameters": {
+                        "service_id": svc["id"]
+                    },
+                    "intent_token": sim_token
                 }
-                requests.post(f"{MCP_BASE_URL}/mcp/infra/restart", json=restart_payload, headers=headers)
-                print(f"  - Restarted {svc['id']}")
+                res = requests.post(f"{MCP_BASE_URL}/mcp/tools/execute", json=payload, headers=headers)
+                if res.status_code == 200:
+                    print(f"  - Restarted {svc['id']}")
+                else:
+                    print(f"  ❌ Failed to restart {svc['id']}: {res.text}")
+                    
     except Exception as e:
         print(f"  ❌ Failed to fetch/restart services: {e}")
 

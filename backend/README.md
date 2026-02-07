@@ -123,6 +123,44 @@ When you run the demo, the following happens:
 -   **Local Only**: Currently configured for `localhost` execution.
 -   **Single Cycle**: The demo script runs a limited number of cycles to demonstrate the flow.
 
+## 🔌 MCP Directory Format (ArmorIQ Spec)
+
+The MCP server exposes a standard interface for tool discovery and execution.
+
+### Endpoints
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/mcp/meta` | Manifest, version, and scopes. |
+| `POST` | `/mcp/tools/list` | List available tools. |
+| `POST` | `/mcp/tools/execute` | Execute a tool (Requires Intent Token). |
+
+### Example usage
+
+**Get Metadata:**
+
+```bash
+curl http://localhost:8000/mcp/meta
+```
+
+**List Tools:**
+
+```bash
+curl -X POST http://localhost:8000/mcp/tools/list
+```
+
+**Execute Tool (Requires Token):**
+
+```bash
+curl -X POST http://localhost:8000/mcp/tools/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tool_name": "infra.restart",
+    "parameters": {"service_id": "web-server"},
+    "intent_token": "valid-armoriq-token"
+  }'
+```
+
 ## 👥 Team & Credits
 
 **Team Name**: [Your Team Name]

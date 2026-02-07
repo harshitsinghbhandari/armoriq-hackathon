@@ -69,34 +69,35 @@ class ArmorIQGateway:
 
     def invoke(self, mcp: str, action: str, intent_token: str, params: Dict[str, Any], user_email: str) -> Dict[str, Any]:
         """
-        Invokes an action via the ArmorIQ gateway.
+        Invokes an action via the ArmorIQ gateway (or Mock).
+        Standard MCP: Calls POST /mcp/tools/execute
         """
         if self.use_mock:
             logger.info(f"[MOCK] Invoking {action} on {mcp} with token {intent_token[:5]}...")
             
-            # Map action to endpoint
-            endpoint = ""
-            if action == "infra.restart":
-                endpoint = "/mcp/infra/restart"
-            elif action == "alert.resolve":
-                endpoint = "/mcp/alerts/resolve"
-            else:
-                logger.warning(f"[MOCK] Unknown action {action}, failing execution.")
-                raise ValueError(f"Unknown action: {action}")
-
-            url = f"{mcp}{endpoint}"
+            url = f"{mcp}/mcp/tools/execute"
+            
+            # Standard MCP Payload
+            payload = {
+                "tool_name": action,
+                "parameters": params,
+                "intent_token": intent_token
+            }
+            
             headers = {
-                "X-ArmorIQ-Intent-ID": intent_token,
-                "X-ArmorIQ-User-Email": user_email,
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "X-ArmorIQ-User-Email": user_email # Optional, for logging/audit context
             }
             
             try:
-                resp = requests.post(url, json=params, headers=headers, timeout=5)
+                resp = requests.post(url, json=payload, headers=headers, timeout=5)
                 resp.raise_for_status()
                 return resp.json()
             except Exception as e:
                 logger.error(f"[MOCK] Execution failed: {e}")
+                # Try to print response text if available
+                if 'resp' in locals():
+                     logger.error(f"Response: {resp.text}")
                 raise
 
         return self.client.invoke(

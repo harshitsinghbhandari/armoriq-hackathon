@@ -5,6 +5,9 @@ import requests
 import logging
 from auth import keycloak
 from armoriq import client as armoriq_client
+import dotenv
+
+dotenv.load_dotenv()
 
 # structured logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

@@ -117,3 +117,34 @@ To facilitate local development without hitting the production ArmorIQ API, we s
 *   **Modifying `.env` but not restarting:** Services load config on startup.
 *   **Changing Prompts without testing:** The LLM might stop producing valid JSON.
 *   **Forgetting `verify_armoriq`:** If you add an MCP endpoint without this dependency, the agent can bypass governance. **Always add authentication dependencies.**
+
+## 10. MCP Directory Format (ArmorIQ Spec)
+
+The MCP server conforms to the ArmorIQ MCP Specification v1.0.
+
+### Manifest (`GET /mcp/meta`)
+Returns the identity and capabilities of the MCP.
+
+```json
+{
+  "mcp_id": "mcp-simulator-001",
+  "version": "1.0.0",
+  "tools": [ ... ],
+  "scopes": ["infra", "alerts"]
+}
+```
+
+### Tool Execution (`POST /mcp/tools/execute`)
+All mutating actions MUST go through this endpoint.
+*   **Payload:** `{ "tool_name": str, "parameters": dict, "intent_token": str }`
+*   **Behavior:**
+    1.  Validates `intent_token` (signature & claims).
+    2.  Looks up `tool_name` in `mcp/registry.py`.
+    3.  Executes tool with `parameters`.
+*   **Security:** Invalid tokens result in `403 Forbidden`.
+
+### How to Add Tools
+1.  Define the function in a module (e.g., `mcp/data.py`).
+2.  Decorate it with `@registry.register`.
+3.  Ensure it includes `description` and `ToolParameter` definitions.
+4.  Restart the server.
