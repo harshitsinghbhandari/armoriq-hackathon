@@ -12,7 +12,7 @@ Traditional AI agents often lack the safety guardrails needed for production inf
 
 ## High-Level Architecture
 
-```mermaid
+```
 graph TD
     User[Admin / Simulator] -->|Injects Issues| MCP[Secure MCP Server]
     Agent[Gemini Agent] -->|Auth (Keycloak)| MCP
