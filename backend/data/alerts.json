@@ -1,0 +1,57 @@
+[
+  {
+    "type": "cpu",
+    "msg": "Storm alert #1 - Random failure",
+    "severity": "high",
+    "status": "open",
+    "resource_id": null,
+    "created_by": "simulator",
+    "id": "alert_1",
+    "created_at": "2026-02-07T22:15:48.559307",
+    "resolved": false
+  },
+  {
+    "type": "network",
+    "msg": "Storm alert #2 - Random failure",
+    "severity": "critical",
+    "status": "open",
+    "resource_id": null,
+    "created_by": "simulator",
+    "id": "alert_2",
+    "created_at": "2026-02-07T22:15:48.662915",
+    "resolved": false
+  },
+  {
+    "type": "memory",
+    "msg": "Storm alert #3 - Random failure",
+    "severity": "critical",
+    "status": "open",
+    "resource_id": null,
+    "created_by": "simulator",
+    "id": "alert_3",
+    "created_at": "2026-02-07T22:15:48.774401",
+    "resolved": false
+  },
+  {
+    "type": "network",
+    "msg": "Storm alert #4 - Random failure",
+    "severity": "low",
+    "status": "open",
+    "resource_id": null,
+    "created_by": "simulator",
+    "id": "alert_4",
+    "created_at": "2026-02-07T22:15:48.889646",
+    "resolved": false
+  },
+  {
+    "type": "cpu",
+    "msg": "Storm alert #5 - Random failure",
+    "severity": "critical",
+    "status": "open",
+    "resource_id": null,
+    "created_by": "simulator",
+    "id": "alert_5",
+    "created_at": "2026-02-07T22:15:49.009186",
+    "resolved": false
+  }
+]

@@ -4,7 +4,7 @@ import os
 import requests
 import logging
 from auth import keycloak
-from armoriq import client as armoriq_client
+from armoriq.client import gateway
 import dotenv
 
 dotenv.load_dotenv()
@@ -28,8 +28,6 @@ def get_state(token: str):
     """Fetch system state (Services and Alerts) directly from MCP."""
     try:
         # Fetch Services
-        # Note: Using requests directly for monitoring/sensing only as per instructions
-        # to remove mcp.client dependency. Execution is strictly via ArmorIQ.
         logger.info(f"Fetching state from {MCP_BASE_URL}...")
         services_resp = requests.get(
             f"{MCP_BASE_URL}/mcp/infra/list",
@@ -52,144 +50,78 @@ def get_state(token: str):
         return services, alerts
     except Exception as e:
         logger.error(f"Failed to fetch state: {e}")
-        # Return empty state to avoid crashing loop if monitoring fails
         return [], []
 
 def call_agent(prompt: str) -> dict:
-    """Call the standalone Agent API to get a plan."""
+    """
+    Call the Agent API to get a plan. 
+    NOTE: The updated agent server now handles full execution if called with /run!
+    However, the orchestrator loop here intends to govern the process itself.
+    If we call /run, it might doubly execute.
+    
+    Decision: The Agent API (`server.py`) now does the full loop for Frontend requests.
+    The Orchestrator (`runner.py`) is an alternative "Background Runner".
+    To avoid double execution, `runner.py` should perhaps JUST get the plan? 
+    But `server.py` `run_agent` does everything. 
+    
+    If we want `runner.py` to be the governor, we need the Agent to exposes a `plan` endpoint ONLY.
+    But `server.py` implementation just now collapsed it all into `/run`.
+    
+    For the hackathon demo, `runner.py` is likely the "Background Loop".
+    If `runner.py` calls `/run`, `server.py` will execute the plan.
+    So `runner.py` just needs to trigger it and log the result.
+    
+    Refactoring runner.py to be a simple trigger for the agent's autonomous cycle.
+    """
     try:
-        logger.info(f"Calling Agent API at {AGENT_API_URL}...")
+        logger.info(f"Triggering Autonomous Agent Cycle via {AGENT_API_URL}...")
         resp = requests.post(
             f"{AGENT_API_URL}/run",
             json={"input": prompt},
             headers={"X-API-Key": AGENT_API_KEY},
-            timeout=30
+            timeout=60 # Extended timeout for full execution
         )
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
         logger.error(f"Agent API call failed: {e}")
-        return {"goal": "Error", "steps": [], "error": str(e)}
+        return {"status": "error", "error": str(e)}
 
 def execute_cycle():
     """
-    Executes one agent cycle following: State -> Agent -> ArmorIQ -> Result
+    Executes one agent cycle. 
+    Since `agent/server.py` now handles the Plan->Govern->Execute loop,
+    this orchestrator simply triggers that process based on current state.
     """
     start_time = time.time()
-    # Unique ID for tracking
     cycle_id = f"cycle-{int(start_time)}"
     
     logger.info(f"Starting Cycle {cycle_id}")
-    
-    result_log = {
-        "cycle_id": cycle_id,
-        "timestamp": start_time,
-        "status": "pending",
-        "stages": {}
-    }
 
-    # 1. Authenticate (for state reading)
+    # 1. Sense (Just for logging here, agent re-senses)
     try:
         token = keycloak.get_access_token()
-        result_log["stages"]["auth"] = "success"
+        services, alerts = get_state(token)
+        logger.info(f"State: {len(services)} services, {len(alerts)} alerts")
+        
+        state_summary = {
+            "services": {s["id"]: s["status"] for s in services},
+            "alerts": [{"id": a["id"], "msg": a["msg"], "severity": a["severity"]} for a in alerts]
+        }
     except Exception as e:
-        logger.error(f"Authentication failed: {e}")
-        return {"status": "error", "message": f"Authentication failed: {e}"}
+        logger.error(f"State sensing failed: {e}")
+        state_summary = "Unknown - Sensing Failed"
 
-    # 2. Get System State
-    services, alerts = get_state(token)
-    logger.info(f"State: {len(services)} services, {len(alerts)} alerts")
+    # 2. Trigger Agent
+    # We pass the high-level goal. The Agent service will fetch fresh state and execute.
+    result = call_agent("Fix any critical issues in the system.")
     
-    state_summary = {
-        "services": {s["id"]: s["status"] for s in services},
-        "alerts": [{"id": a["id"], "msg": a["msg"], "severity": a["severity"]} for a in alerts]
-    }
-    result_log["stages"]["state"] = state_summary
+    logger.info(f"Cycle Result: {result.get('status')}")
+    if result.get("results"):
+        for res in result["results"]:
+            logger.info(f"  Action: {res['action']} -> {res['status']}")
 
-    # 3. Consult LLM (Agent API)
-    # Prepare prompt with state only. 
-    # System prompt on server side handles instructions.
-    prompt = f"Current system state:\n{json.dumps(state_summary, indent=2)}"
-    
-    plan = call_agent(prompt)
-    
-    # Handle potentially malformed plan
-    if not isinstance(plan, dict):
-        logger.warning(f"Agent returned invalid plan format: {plan}")
-        plan = {"goal": "Error", "steps": [], "raw": str(plan)}
-
-    logger.info(f"Plan received with {len(plan.get('steps', []))} steps")
-    result_log["stages"]["plan"] = plan
-
-    if not plan.get("steps"):
-        logger.info("No steps in plan. Cycle complete.")
-        return {"status": "success", "message": "No steps", "log": result_log}
-
-    # 4. Governance (ArmorIQ)
-    try:
-        logger.info("Submitting plan to ArmorIQ...")
-        # Capture Plan
-        captured_plan = armoriq_client.gateway.capture_plan(
-            llm="agent-service-v1",
-            prompt=prompt,
-            plan=plan
-        )
-        
-        # Get Intent Token
-        intent_token = armoriq_client.gateway.get_intent_token(captured_plan)
-        logger.info(f"Intent approved. Token: {intent_token[:8]}...")
-        result_log["stages"]["governance"] = "approved"
-    except Exception as e:
-        logger.error(f"Governance Blocked: {e}")
-        result_log["stages"]["governance"] = f"blocked: {e}"
-        return {"status": "blocked", "error": str(e), "log": result_log}
-
-    # 5. Execution (via ArmorIQ)
-    execution_results = []
-    user_email = keycloak.BOT_USER
-    
-    logger.info("Executing steps via ArmorIQ...")
-    for step in plan["steps"]:
-        action = step.get("action")
-        if not action:
-            continue
-            
-        # Determine MCP URL (default to configured MCP)
-        # Plan might return "mcp": "{mcp_base_url}" based on system prompt template
-        # We should use our configured URL
-        mcp_url = MCP_BASE_URL
-        params = step.get("params", {})
-        
-        step_log = {"action": action, "params": params}
-        logger.info(f"Invoking {action} on {mcp_url}")
-        
-        try:
-            # EXECUTE ONLY VIA ARMORIQ
-            res = armoriq_client.gateway.invoke(
-                mcp=mcp_url,
-                action=action,
-                intent_token=intent_token,
-                params=params,
-                user_email=user_email
-            )
-            logger.info(f"Success: {res}")
-            step_log["status"] = "success"
-            step_log["output"] = res
-        except Exception as e:
-            logger.error(f"Execution Failed for {action}: {e}")
-            step_log["status"] = "failed"
-            step_log["error"] = str(e)
-            execution_results.append(step_log)
-            # Stop execution on failure
-            logger.error("Stopping execution due to failure.")
-            break
-        
-        execution_results.append(step_log)
-
-    result_log["stages"]["execution"] = execution_results
-    result_log["status"] = "success"
-    
-    return result_log
+    return result
 
 if __name__ == "__main__":
     execute_cycle()

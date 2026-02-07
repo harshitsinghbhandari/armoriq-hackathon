@@ -51,13 +51,23 @@ function App() {
         { input: goal || "Fix the system" },
         { headers: { 'x-api-key': 'default-insecure-key' } }
       );
-      setPlan(res.data.plan); // Note: server.py returns `plan` directly or as a dict? 
-      // User's server.py: `return plan`. `generate_plan` likely returns a dict or object. 
-      // If `generate_plan` returns a dict, then `res.data` IS that dict.
-      // If `generate_plan` returns the full plan structure, we probably want `res.data`.
-      // Let's assume res.data IS the plan.
-      setPlan(res.data);
-      setLastStatus('success');
+
+      // Update with full response
+      const data = res.data;
+      // server.py returns { plan: { ... }, ... }
+      // The plan object itself might have { goal: ..., steps: ... }
+      setPlan(data.plan);
+
+      // Check status
+      if (data.status === 'completed') {
+        setLastStatus('success');
+      } else if (data.status === 'blocked') {
+        setLastStatus('blocked: ' + data.error);
+      } else {
+        setLastStatus(data.status);
+      }
+
+      // Refresh logs immediately if possible or rely on poll
     } catch (error) {
       console.error("Agent run error:", error);
       setLastStatus('error');

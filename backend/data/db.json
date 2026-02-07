@@ -1,0 +1,11 @@
+{
+  "prod_db": {
+    "id": "prod_db",
+    "name": "Production Database",
+    "type": "postgresql",
+    "status": "healthy",
+    "size_mb": 1024,
+    "last_backup": "2026-02-07T19:59:37.088706",
+    "created_at": "2026-02-07T21:59:37.088704"
+  }
+}

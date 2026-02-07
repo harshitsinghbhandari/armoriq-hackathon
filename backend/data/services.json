@@ -1,0 +1,26 @@
+{
+  "auth": {
+    "id": "auth",
+    "name": "Authentication Service",
+    "status": "running",
+    "port": 8001,
+    "health": "healthy",
+    "started_at": "2026-02-07T21:59:37.088466"
+  },
+  "payments": {
+    "id": "payments",
+    "name": "Payments Service",
+    "status": "running",
+    "port": 8002,
+    "health": "healthy",
+    "started_at": "2026-02-07T21:59:37.088466"
+  },
+  "db": {
+    "id": "db",
+    "name": "Database Service",
+    "status": "running",
+    "port": 5432,
+    "health": "healthy",
+    "started_at": "2026-02-07T21:59:37.088466"
+  }
+}

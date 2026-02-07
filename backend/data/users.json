@@ -1,0 +1,23 @@
+{
+  "root": {
+    "id": "root",
+    "name": "Root",
+    "email": "root@platform.local",
+    "role": "superadmin",
+    "created_at": "2026-02-07T21:59:37.088330"
+  },
+  "alice": {
+    "id": "alice",
+    "name": "Alice",
+    "email": "alice@platform.local",
+    "role": "admin",
+    "created_at": "2026-02-07T21:59:37.088330"
+  },
+  "bob": {
+    "id": "bob",
+    "name": "Bob",
+    "email": "bob@platform.local",
+    "role": "junior",
+    "created_at": "2026-02-07T21:59:37.088330"
+  }
+}

@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("mcp-server")
 
 from system import logger as audit_logger  # Rename for clarity
-from mcp import infra, alerts
+from mcp import infra, alerts, users, data, security
 from mcp.registry import registry
 
 app = FastAPI(
