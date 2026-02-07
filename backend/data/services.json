@@ -13,7 +13,7 @@
     "status": "running",
     "port": 8002,
     "health": "healthy",
-    "started_at": "2026-02-07T21:59:37.088466"
+    "started_at": "2026-02-07T17:47:21"
   },
   "db": {
     "id": "db",

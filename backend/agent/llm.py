@@ -31,6 +31,16 @@ def generate_plan(prompt: str) -> dict:
     Generates a plan using Ollama based on the input prompt.
     The input prompt is treated as the user message, combined with the system prompt.
     """
+    if os.getenv("MOCK_LLM") == "true":
+        return {
+            "goal": "Restore system health",
+            "steps": [
+                {
+                    "action": "infra.restart",
+                    "params": {"service_id": "payments", "user_email": "admin_agent"}
+                }
+            ]
+        }
     try:
         response = ollama.chat(model=MODEL, messages=[
             {

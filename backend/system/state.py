@@ -168,8 +168,7 @@ class SystemState:
                 return self.databases[db_id]
             return None
     
-<<<<<<< Updated upstream
-    # ----- Alert Methods -----
+    # ALERTS
     def get_alerts(self) -> list:
         return self.alerts
     
@@ -181,11 +180,6 @@ class SystemState:
         return None
 
     def add_alert(self, alert: dict) -> dict:
-=======
-    # ALERTS
-    def get_alerts(self) -> list: return self.alerts
-    def add_alert(self, alert: dict):
->>>>>>> Stashed changes
         with self._lock:
             alert["id"] = f"alert_{len(self.alerts) + 1}"
             alert["created_at"] = datetime.now().isoformat()
@@ -193,6 +187,7 @@ class SystemState:
             self.alerts.append(alert)
             self._persist("alerts")
             return alert
+
     def resolve_alert(self, alert_id: str):
         with self._lock:
             for alert in self.alerts:
