@@ -19,7 +19,7 @@ echo "   PID: $AGENT_PID"
 
 # 2. Start MCP Simulator (Port 8000)
 echo "☁️  Starting MCP Simulator (Port 8000)..."
-uvicorn main:app --host 0.0.0.0 --port 8000 > mcp_server.log 2>&1 &
+uvicorn mcp.main:app --host 0.0.0.0 --port 8000 > mcp_server.log 2>&1 &
 MCP_PID=$!
 echo "   PID: $MCP_PID"
 
