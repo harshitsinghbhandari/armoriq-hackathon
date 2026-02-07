@@ -39,13 +39,41 @@ graph TD
 
 ### Prerequisites
 *   Python 3.10+
-*   Running Keycloak instance (configured with realm `hackathon`)
+*   Java 17+ (Required for Keycloak)
+*   Keycloak 26.0.0+ (Local installation)
 *   Gemini API Key
 
 ### Setup
-1.  Clone the repository.
-2.  Install dependencies: `pip install -r requirements.txt` (or manually install `google-genai`, `python-dotenv`, `requests`, `uvicorn`, `fastapi`).
-3.  Set up environment variables in `.env`:
+### Setup
+
+1.  **Clone the repository.**
+2.  **Install Python dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    # Or manually:
+    # pip install google-genai python-dotenv requests uvicorn fastapi
+    ```
+3.  **Set up Keycloak:**
+    *   Download Keycloak from [keycloak.org](https://www.keycloak.org/downloads).
+    *   Extract the archive to a known location (e.g., `~/keycloak`).
+    *   Import the realm and start Keycloak:
+        ```bash
+        # Make the setup script executable
+        chmod +x keycloak/setup_keycloak.sh
+
+        # Run the setup script with the path to your Keycloak directory
+        ./keycloak/setup_keycloak.sh /path/to/keycloak-26.0.0
+        ```
+    *   *Note: This script imports `keycloak/hackathon-realm.json` and starts Keycloak in dev mode on port 8080.*
+
+4.  **Set up environment variables:**
+    *   Copy `.env.example` to `.env`:
+        ```bash
+        cp keycloak/.env.example .env
+        ```
+    *   Edit `.env` and add your `GEMINI_API_KEY`.
+    *   Ensure `MCP_USER` and `MCP_PASSWORD` match the credentials in Keycloak (default in realm: `admin_agent` / `adminpass`).
+
     ```bash
     GEMINI_API_KEY=your_key_here
     MCP_USER=admin_agent
@@ -67,6 +95,46 @@ graph TD
     python agent_basic.py
     ```
     *Watch the agent authenticate, analyze the alerts, and autonomously resolve them.*
+
+### Verification
+1.  **Keycloak:** Open [http://localhost:8080](http://localhost:8080). You should see the Keycloak welcome page.
+2.  **MCP Server:** Open [http://localhost:8000/docs](http://localhost:8000/docs). You should see the FastAPI Swagger UI.
+3.  **Agent:** The agent script should output "Authentication successful" and then proceed to list alerts.
+
+## Reproducing the Environment on a New Machine
+
+Follow these step-by-step instructions to set up the complete ArmorIQ environment from scratch:
+
+1.  **System Requirements:**
+    *   Ensure Java 17+ is installed (`java -version`).
+    *   Ensure Python 3.10+ is installed (`python3 --version`).
+
+2.  **Keycloak Installation:**
+    *   Download Keycloak (e.g., 26.0.0) zip/tar.gz.
+    *   Extract it: `tar -xvzf keycloak-26.0.0.tar.gz`.
+
+3.  **Project Setup:**
+    *   `git clone <repo_url>`
+    *   `cd armoriq-hackathon`
+    *   `pip install -r requirements.txt`
+
+4.  **Configure Identity (Keycloak):**
+    *   Run: `./keycloak/setup_keycloak.sh <path_to_extracted_keycloak>`
+    *   This script automatically:
+        *   Imports the `hackathon` realm from `keycloak/hackathon-realm.json`.
+        *   Creates the necessary clients and users (`admin_agent`).
+        *   Starts Keycloak in development mode.
+
+5.  **Configure Secrets:**
+    *   Create `.env` file.
+    *   Add `GEMINI_API_KEY`.
+    *   Verify `MCP_USER`/`MCP_PASSWORD` against Keycloak user (if you changed them).
+
+6.  **Launch:**
+    *   Terminal 1 (Keycloak): Already running from step 4 or run `$KEYCLOAK_HOME/bin/kc.sh start-dev`.
+    *   Terminal 2 (MCP): `uvicorn main:app --reload`.
+    *   Terminal 3 (Sim): `python insert_issues.py storm 3`.
+    *   Terminal 4 (Agent): `python agent_basic.py`.
 
 ## Tech Stack
 *   **AI:** Google Gemini 2.5 Flash

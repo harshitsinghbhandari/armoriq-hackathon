@@ -15,12 +15,19 @@ The system is currently in a **functional prototype** state. The core mechanics 
     - Uses `gemini-2.5-flash` to reason about the state and generate a structured JSON plan.
     - Executes actions (`infra.restart`, `alert.resolve`) via the MCP API.
 
-### 2. Keycloak Auth (`auth.py`)
-- **Role:** Identity Provider (IdP).
+### 2. Keycloak Auth (`auth.py` & External Service)
+- **Role:** Identity Provider (IdP) and Access Control.
+- **Architecture:**
+    - **Realm:** `hackathon` (Tenant isolation).
+    - **Client:** `mcp-client` (OIDC client for the agent).
+    - **Users:** `admin_agent` (Service account-like user).
 - **Function:**
-    - Issues OpenID Connect (OIDC) tokens.
-    - Manages users, roles, and clients.
+    - Issues OpenID Connect (OIDC) tokens via the `password` grant type.
+    - Validates JWT tokens signed by the realm's private key.
     - Enforces authentication for all API endpoints.
+- **Integration:**
+    - The Agent requests a token from `http://localhost:8080/realms/hackathon/protocol/openid-connect/token`.
+    - The MCP Server verifies the token using the realm's public key (fetched from JWKS endpoint).
 
 ### 3. Secure MCP Services (`mcp/*.py`)
 - **Role:** The "hands" of the system (Model Context Protocol server).
@@ -42,6 +49,47 @@ The system is currently in a **functional prototype** state. The core mechanics 
     - Injects synthetic failures (alerts, service degradations) into the system.
     - Used to test the agent's recovery capabilities.
 
+## Realm Management & Setup
+
+### Keycloak Setup Script (`keycloak/setup_keycloak.sh`)
+This script automates the bootstrapping of the local Keycloak environment.
+
+*   **Usage:** `./keycloak/setup_keycloak.sh <path_to_keycloak_dir>`
+*   **What it does:**
+    1.  Starts Keycloak in import mode.
+    2.  Imports `keycloak/hackathon-realm.json`.
+    3.  Starts Keycloak in development mode (`start-dev`).
+
+### Realm Export/Import Workflow
+To share configuration changes (e.g., new clients, roles):
+
+1.  **Export:**
+    ```bash
+    # Stop Keycloak first
+    $KEYCLOAK_HOME/bin/kc.sh export --dir ./keycloak_export --realm hackathon --users realm_file
+    # Overwrite the project file with the new export
+    mv ./keycloak_export/hackathon-realm.json ./keycloak/hackathon-realm.json
+    ```
+2.  **Commit:** Check in the updated `hackathon-realm.json` to git.
+3.  **Import:** Teammates run `setup_keycloak.sh` to get the changes.
+
+## Troubleshooting
+
+### Common Setup Errors
+
+| Error | Cause | Fix |
+| :--- | :--- | :--- |
+| `connection refused` on port 8080 | Keycloak not running | Run `setup_keycloak.sh` or checks logs. |
+| `401 Unauthorized` (Agent) | Invalid credentials in `.env` | Verify `MCP_USER` and `MCP_PASSWORD` against Keycloak users. |
+| `Keycloak connection failed` (MCP) | MCP cannot reach Keycloak | Ensure Keycloak is on `localhost:8080` (default). |
+| `Invalid token signature` | Realm keys rotated/mismatch | Restart Keycloak with the correct `hackathon-realm.json`. |
+
+### Agent "Stuck"
+If the agent loops without taking action:
+1.  Check `audit.log` for policy denials.
+2.  Verify the prompt in `agent_basic.py` isn't hitting safety filters (rare).
+3.  Restart the MCP server to clear transient state.
+
 ## Execution Flow (Step-by-Step)
 
 1.  **Issue Injection:** `insert_issues.py` POSTs a new alert to `mcp/alerts/create`.
@@ -57,6 +105,11 @@ The system is currently in a **functional prototype** state. The core mechanics 
 *   **Zero Trust:** No action is trusted implicitly; all must carry a valid token.
 *   **Least Privilege:** The agent account should only have the roles necessary for its function (e.g., `operator`, not `admin`).
 *   **Auditability:** Non-repudiation of actions via signed tokens and immutable logs.
+
+### Security Notes (What NOT to Commit)
+*   **NEVER commit `.env` files.** They contain API keys and passwords.
+*   **NEVER commit Keycloak master realm exports.** Only export the `hackathon` realm.
+*   **Avoid committing real user data.** The `hackathon-realm.json` should only contain test users.
 
 ## Governance Model
 *   **Policy as Code:** Governance rules are defined in Python, not vague documents.
