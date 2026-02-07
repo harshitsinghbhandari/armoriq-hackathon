@@ -63,7 +63,7 @@ The system follows a strict **Sense -> Plan -> Govern -> Act** loop.
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-repo/armoriq-agent.git
+git clone https://github.com/harshitsinghbhandari/armoriq-agent.git
 cd armoriq-agent
 ```
 
@@ -217,8 +217,8 @@ npm run dev
 Built for the **ArmorIQ Hackathon 2024**.
 
 **Team:**
-- **Harshit Singh Bhandari** - Lead Engineer
-- [Your Name/Teammate] - Governance & Security
-- [Your Name/Teammate] - Frontend & UX
-
+- **Harshit Singh Bhandari** 
+- **Arhan Khade**
+- **Adit Prabhu**
+- **Atharva Shetwe**
 Licensed under the MIT License.

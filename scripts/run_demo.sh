@@ -8,14 +8,14 @@ lsof -ti :8001 | xargs kill -9 2>/dev/null
 # Start MCP
 echo "Starting MCP Simulator on port 8000..."
 cd backend
-python3 -m uvicorn mcp.main:app --host 0.0.0.0 --port 8000 --reload &
+/env/bin/python -m uvicorn mcp.main:app --host 0.0.0.0 --port 8000 --reload &
 MCP_PID=$!
 cd ..
 
 # Start Agent
 echo "Starting Agent Service on port 8001..."
 cd backend
-python3 -m uvicorn agent.server:app --host 0.0.0.0 --port 8001 --reload &
+/env/bin/python -m uvicorn agent.server:app --host 0.0.0.0 --port 8001 --reload &
 AGENT_PID=$!
 cd ..
 
