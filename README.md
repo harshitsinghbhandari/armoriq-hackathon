@@ -1,151 +1,134 @@
-# ArmorIQ: Governed AI Sysadmin
+# ArmorIQ Hackathon Submission: Autonomous Sysadmin Agent
 
-> **Autonomous Infrastructure Management with Secure Governance**
+## 🚀 Project Overview
 
-ArmorIQ is a governed AI sysadmin assistant that combines the reasoning power of Gemini with strict policy enforcement, Keycloak IAM, and secure MCP servers. It provides a closed-loop system for detecting, analyzing, and resolving infrastructure issues autonomously, while ensuring every action is authorized and audited.
+This project implements an **Autonomous Sysadmin Assistant** that leverages **Ollama** (local LLM) to reason about system health and **ArmorIQ** to govern and authorize execute actions. The system is designed to autonomously detect issues (e.g., stopped services, high CPU usage), propose remediation plans, and execute them safely under strict policy control.
 
-## Problem Solved
-Traditional AI agents often lack the safety guardrails needed for production infrastructure. ArmorIQ solves this by wrapping a reasoning agent in a secure execution environment where:
-*   **Identity is enforced:** The agent must authenticate like any other user.
-*   **Policy is code:** Actions are checked against a centralized policy engine before execution.
-*   **Audit is immutable:** Every decision and action is logged for accountability.
+Unlike typical improved CLI tools, this agent introduces a **Governance Layer** where every action is:
+1.  **Planned**: The agent reasons about the state and proposes a plan.
+2.  ** governed**: The plan is submitted to ArmorIQ for policy checks and approval.
+3.  **Token-Gated**: Execution on the system (MCP) is only possible with a valid, signed **Intent Token** from ArmorIQ.
+4.  **Verified**: The system guarantees that the executed action matches the approved intent.
 
-## High-Level Architecture
+## 🏗️ Architecture
 
-```
+The system follows a strict **Plan -> Govern -> Execute** loop.
+
+```mermaid
 graph TD
-    User[Admin / Simulator] -->|Injects Issues| MCP[Secure MCP Server]
-    Agent[Gemini Agent] -->|Auth (Keycloak)| MCP
-    MCP -->|Enforce Policy| Policy[Policy Engine]
-    MCP -->|Log Action| Audit[Audit Log]
-    Agent -->|Read State| MCP
-    Agent -->|Execute Action| MCP
+    subgraph "Local Environment"
+        System[Managed System (MCP)]
+        Agent[Ollama Agent]
+        Orchestrator[Orchestrator Loop]
+    end
+    
+    subgraph "Cloud / Governance"
+        ArmorIQ[ArmorIQ Policy Engine]
+    end
+
+    System -- 1. State (Services, Alerts) --> Orchestrator
+    Orchestrator -- 2. State --> Agent
+    Agent -- 3. Proposed Plan (JSON) --> Orchestrator
+    
+    Orchestrator -- 4. Submit Plan --> ArmorIQ
+    ArmorIQ -- 5. Approve & Sign --> Orchestrator
+    
+    Orchestrator -- 6. Execute (Action + Intent Token) --> System
+    System -- 7. Validate Token & Action --> Orchestrator
 ```
 
-## Key Governance Guarantees
-1.  **Identity Binding:** All actions are tied to a verified Keycloak identity.
-2.  **Role-Based Access:** The agent operates within strict role limits (e.g., can restart services but cannot delete data).
-3.  **Audit Trail:** Comprehensive logging of all API calls, policy decisions, and agent actions.
-4.  **Human-in-the-Loop Ready:** Designed to escalate ambiguity or high-risk actions (future scope).
+### Components
+-   **Agent (Ollama)**: A local LLM service that receives system state and outputs a structured remediation plan.
+-   **ArmorIQ**: The governance authority. It reviews plans against policies and issues cryptographic Intent Tokens for approved actions.
+-   **System (MCP)**: A "Mini Cloud Platform" simulator that mimics a real server environment. It allows actions (like `restart_service`) ONLY IF accompanied by a valid ArmorIQ Intent Token.
+-   **Orchestrator**: A lightweight runner that coordinates the cycle between these components.
 
-## Autonomous Agent Workflow
-1.  **Monitor:** The agent polls the MCP server for system state (services, alerts).
-2.  **Reason:** Gemini 2.5 Flash analyzes the state to determine the root cause and optimal recovery action.
-3.  **Decide:** The agent formulates a plan (e.g., restart service, resolve alert) and outputs structured JSON.
-4.  **Act:** The agent executes the plan via authenticated API calls to the MCP server.
-5.  **Verify:** The MCP server validates the action against the policy engine before execution.
+## 🛡️ Key Guarantees
 
-## Demo Instructions
+1.  **Plan-Based Execution**: The agent never acts impulsively. It must first articulate a plan, which is reviewed before any side-effect occurs.
+2.  **Token-Gated Actions**: The `mcp` (System) endpoints are locked. They require an `x-armoriq-intent-token` header. This token is *only* obtainable via the ArmorIQ approval flow.
+3.  **No Undeclared Actions**: The Intent Token binds a specific action and parameters to the approval. The agent cannot get approval for "check status" and then execute "delete database".
 
-### Prerequisites
-*   Python 3.10+
-*   Java 17+ (Required for Keycloak)
-*   Keycloak 26.0.0+ (Local installation)
-*   Gemini API Key
+## 🛠️ Prerequisites
 
-### Setup
-### Setup
+-   **Python 3.10+**
+-   **Ollama**: Running locally with a capable model (e.g., `llama3` or `mistral`).
+    -   `ollama pull mistake` (or your preferred model)
+-   **ArmorIQ API Key**: Sign up at [ArmorIQ](https://armoriq.com) (or use Mock mode).
+-   **Java (Optional)**: For running a local Keycloak instance if standard authentication is required.
 
-1.  **Clone the repository.**
-2.  **Install Python dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    # Or manually:
-    # pip install google-genai python-dotenv requests uvicorn fastapi
-    ```
-3.  **Set up Keycloak:**
-    *   Download Keycloak from [keycloak.org](https://www.keycloak.org/downloads).
-    *   Extract the archive to a known location (e.g., `~/keycloak`).
-    *   Import the realm and start Keycloak:
-        ```bash
-        # Make the setup script executable
-        chmod +x keycloak/setup_keycloak.sh
+## ⚡ Quickstart
 
-        # Run the setup script with the path to your Keycloak directory
-        ./keycloak/setup_keycloak.sh /path/to/keycloak-26.0.0
-        ```
-    *   *Note: This script imports `keycloak/hackathon-realm.json` and starts Keycloak in dev mode on port 8080.*
+### 1. Installation
 
-4.  **Set up environment variables:**
-    *   Copy `.env.example` to `.env`:
-        ```bash
-        cp keycloak/.env.example .env
-        ```
-    *   Edit `.env` and add your `GEMINI_API_KEY`.
-    *   Ensure `MCP_USER` and `MCP_PASSWORD` match the credentials in Keycloak (default in realm: `admin_agent` / `adminpass`).
+```bash
+git clone https://github.com/your-repo/armoriq-agent.git
+cd armoriq-agent
+pip install -r requirements.txt
+```
 
-    ```bash
-    GEMINI_API_KEY=your_key_here
-    MCP_USER=admin_agent
-    MCP_PASSWORD=adminpass
-    ```
+### 2. Configuration
 
-### Running the Demo
-1.  **Start the MCP Server:**
-    ```bash
-    uvicorn main:app --reload
-    ```
-2.  **Start the Outcome Simulator (in a new terminal):**
-    ```bash
-    python insert_issues.py storm 5
-    ```
-    *This creates a "storm" of 5 random alerts.*
-3.  **Run the Agent:**
-    ```bash
-    python agent_basic.py
-    ```
-    *Watch the agent authenticate, analyze the alerts, and autonomously resolve them.*
+Create a `.env` file or export the necessary variables:
 
-### Verification
-1.  **Keycloak:** Open [http://localhost:8080](http://localhost:8080). You should see the Keycloak welcome page.
-2.  **MCP Server:** Open [http://localhost:8000/docs](http://localhost:8000/docs). You should see the FastAPI Swagger UI.
-3.  **Agent:** The agent script should output "Authentication successful" and then proceed to list alerts.
+```bash
+# ArmorIQ Configuration
+export ARMORIQ_API_KEY="your-api-key-here"
 
-## Reproducing the Environment on a New Machine
+# (Optional) If using a specific local model
+export OLLAMA_MODEL="mistral"
+```
 
-Follow these step-by-step instructions to set up the complete ArmorIQ environment from scratch:
+*Note: If `ARMORIQ_API_KEY` is missing, the system will run in **MOCK** mode for demonstration purposes.*
 
-1.  **System Requirements:**
-    *   Ensure Java 17+ is installed (`java -version`).
-    *   Ensure Python 3.10+ is installed (`python3 --version`).
+### 3. Run the Demo
 
-2.  **Keycloak Installation:**
-    *   Download Keycloak (e.g., 26.0.0) zip/tar.gz.
-    *   Extract it: `tar -xvzf keycloak-26.0.0.tar.gz`.
+We provide a script that spins up the Agent, the MCP System, and runs the Orchestrator loop.
 
-3.  **Project Setup:**
-    *   `git clone <repo_url>`
-    *   `cd armoriq-hackathon`
-    *   `pip install -r requirements.txt`
+```bash
+./scripts/run_demo.sh
+```
 
-4.  **Configure Identity (Keycloak):**
-    *   Run: `./keycloak/setup_keycloak.sh <path_to_extracted_keycloak>`
-    *   This script automatically:
-        *   Imports the `hackathon` realm from `keycloak/hackathon-realm.json`.
-        *   Creates the necessary clients and users (`admin_agent`).
-        *   Starts Keycloak in development mode.
+## 🎥 Demo Walkthrough
 
-5.  **Configure Secrets:**
-    *   Create `.env` file.
-    *   Add `GEMINI_API_KEY`.
-    *   Verify `MCP_USER`/`MCP_PASSWORD` against Keycloak user (if you changed them).
+When you run the demo, the following happens:
 
-6.  **Launch:**
-    *   Terminal 1 (Keycloak): Already running from step 4 or run `$KEYCLOAK_HOME/bin/kc.sh start-dev`.
-    *   Terminal 2 (MCP): `uvicorn main:app --reload`.
-    *   Terminal 3 (Sim): `python insert_issues.py storm 3`.
-    *   Terminal 4 (Agent): `python agent_basic.py`.
+1.  **Boot**: The Agent Service (port 8001) and MCP Simulator (port 8000) start up.
+2.  **Sense**: The Orchestrator queries the MCP for current status.
+    -   *Example: "Service 'web-server' is CRITICAL (stopped)."*
+3.  **Plan**: The Agent analyzes the state and proposes a fix.
+    -   *Plan: "Restart 'web-server' to restore availability."*
+4.  **Govern**: The plan is sent to ArmorIQ. Use the ArmorIQ dashboard to see the request (if using the real API).
+    -   *Status: Approved. Token Issued.*
+5.  **Act**: The Orchestrator calls the `restart_service` endpoint on the MCP with the Intent Token.
+6.  **Verify**: The service restarts, and the new state is reflected in the next cycle.
 
-## Tech Stack
-*   **AI:** Google Gemini 2.5 Flash
-*   **Backend:** FastAPI / Python
-*   **Auth:** Keycloak (OpenID Connect)
-*   **Protocol:** Model Context Protocol (MCP) concepts
-*   **Governance:** Custom Policy Engine
+## 📂 Repository Structure
 
-## Team
-*  Arhan Khade
-*  Adit Prabhu
-*  Atharv Shetwe
-*  Harshit Singh Bhandari
+```text
+├── agent/            # Ollama-based Agent Service (FastAPI)
+├── armoriq/          # ArmorIQ Client & SDK Integration
+├── auth/             # Keycloak Authentication Helpers
+├── mcp/              # Mini Cloud Platform (System Simulator)
+├── orchestrator/     # Main control loop (Runner)
+├── policy/           # Policy definitions (if local)
+├── scripts/          # Startup and utility scripts
+├── .env.example      # Environment variable template
+└── requirements.txt  # Python dependencies
+```
 
+## ⚠️ Limitations
+
+-   **Mock Mode**: Without a valid ArmorIQ API Key, the system mimics governance approval locally.
+-   **Local Only**: Currently configured for `localhost` execution.
+-   **Single Cycle**: The demo script runs a limited number of cycles to demonstrate the flow.
+
+## 👥 Team & Credits
+
+**Team Name**: [Your Team Name]
+
+-   **Harshit Singh Bhandari** - Agent & Orchestrator
+-   [Teammate Name] - ArmorIQ Integration
+-   [Teammate Name] - MCP Simulator
+
+Built for the **ArmorIQ Hackathon 2024**.

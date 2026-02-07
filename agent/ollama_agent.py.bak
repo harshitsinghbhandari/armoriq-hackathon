@@ -1,0 +1,78 @@
+import os
+import re
+import json
+import ollama
+import dotenv
+
+dotenv.load_dotenv()
+
+# Configuration
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+
+# Set client host if needed, though ollama library usually defaults to localhost:11434
+# ollama_client = ollama.Client(host=OLLAMA_HOST) 
+
+def extract_json(text: str) -> str:
+    """Extract first JSON object from model output."""
+    text = text.replace("```json", "").replace("```", "").strip()
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError("No JSON object found in output")
+    return match.group(0)
+
+def build_prompt(services, alerts, mcp_base_url):
+    state_summary = {
+        "services": {s["id"]: s["status"] for s in services},
+        "alerts": [{"id": a["id"], "msg": a["msg"], "severity": a["severity"]} for a in alerts]
+    }
+
+    return f"""
+You are a sysadmin AI assistant.
+
+Current system state:
+{json.dumps(state_summary, indent=2)}
+
+Your job:
+Formulate a plan to address any issues.
+
+Rules:
+- Available actions:
+  - infra.restart (requires 'service_id')
+  - alert.resolve (requires 'alert_id')
+- Prioritize CRITICAL alerts.
+- Be conservative.
+- Output ONLY valid JSON.
+
+Return exactly this plan format:
+{{
+  "goal": "<high level goal>",
+  "steps": [
+    {{
+      "action": "<action>",
+      "mcp": "{mcp_base_url}",
+      "params": {{ ... }}
+    }}
+  ]
+}}
+
+If no action is needed, return empty steps.
+"""
+
+def generate_plan(services: list, alerts: list, mcp_base_url: str) -> tuple[dict, str]:
+    """Generates a plan using Ollama based on current state. Returns (plan_dict, prompt_str)."""
+    prompt = build_prompt(services, alerts, mcp_base_url)
+    
+    try:
+        response = ollama.chat(model=MODEL, messages=[
+            {
+                'role': 'user',
+                'content': prompt,
+            },
+        ])
+        text = response['message']['content'].strip()
+        clean_json = extract_json(text)
+        return json.loads(clean_json), prompt
+    except Exception as e:
+        print(f"❌ LLM Error (Ollama): {e}")
+        return {"goal": "Error", "steps": []}, prompt

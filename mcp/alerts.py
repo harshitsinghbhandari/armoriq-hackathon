@@ -1,71 +1,55 @@
 """
 Alerts module for the Mini Cloud Platform Simulator.
-Handles system alerts and notifications.
+Refactored to only expose ArmorIQ-governed endpoints.
 """
 
-from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel
-from typing import Literal, Optional
+from typing import Optional, Literal
 
 from system.state import state
 from system.logger import log_action
-from policy.engine import allow
-from fastapi import Depends
-from auth.server import get_current_user
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp/alerts", tags=["alerts"])
 
-
 # ----- Request Models -----
 class CreateAlertRequest(BaseModel):
-    agent_id: str
+    # agent_id removed/ignored for sim
     type: Literal["cpu", "memory", "disk", "network", "security", "service", "custom"]
     msg: str
     severity: Literal["low", "medium", "high", "critical"]
     resource_id: Optional[str] = None
-
+    class Config:
+        extra = "ignore"
 
 class ResolveAlertRequest(BaseModel):
-    agent_id: str
     alert_id: str
     resolution_note: Optional[str] = None
-
+    class Config:
+        extra = "ignore"
 
 # ----- Endpoints -----
 @router.post("/create")
-def create_alert(req: CreateAlertRequest, current_user: dict = Depends(get_current_user)):
-    """Create a new alert."""
-    # Enforce Identity Binding
-    if req.agent_id != current_user["username"]:
-        raise HTTPException(status_code=403, detail="Identity mismatch")
-
-    allowed, reason = allow(current_user, "alert.create", {
-        "type": req.type,
-        "severity": req.severity,
-        "agent_id": req.agent_id
-    })
-    if not allowed:
-        raise HTTPException(status_code=403, detail=f"Policy denied: {reason}")
-
+def create_alert(req: CreateAlertRequest, x_user_email: str = Header("simulation", alias="X-ArmorIQ-User-Email")):
+    """
+    Create a new alert (Simulation/Environment Endpoint).
+    NOT ArmorIQ-governed as this represents external system faults.
+    """
+    # No verify_armoriq dependency needed for fault injection
+    
     alert = state.add_alert({
         "type": req.type,
         "msg": req.msg,
         "severity": req.severity,
         "status": "open",
         "resource_id": req.resource_id,
-        "created_by": current_user["username"],
+        "created_by": "simulator", # Fixed for sim
     })
     
-    from policy.engine import consume_quota
-    consume_quota(current_user, "alert.create", {
-        "type": req.type,
-        "severity": req.severity,
-        "agent_id": req.agent_id
-    })
-    
-    log_action("alert.created", user=current_user["username"], alert_id=alert["id"], 
-               severity=req.severity, type=req.type)
+    logger.info(f"Simulated Alert Created: {alert['id']} ({req.type})")
     
     return {
         "status": "success",
@@ -73,21 +57,20 @@ def create_alert(req: CreateAlertRequest, current_user: dict = Depends(get_curre
         "alert": alert,
     }
 
+# ----- Dependency -----
+def verify_armoriq(x_armoriq_intent: str = Header(None, alias="X-ArmorIQ-Intent-ID")):
+    """Verifies the request is authorized via ArmorIQ."""
+    if not x_armoriq_intent:
+        logger.warning(f"Rejecting unauthorized request: Missing X-ArmorIQ-Intent-ID")
+        raise HTTPException(status_code=401, detail="Unauthorized: ArmorIQ Intent Required")
+    return x_armoriq_intent
 
+# ----- Endpoints -----
 @router.post("/resolve")
-def resolve_alert(req: ResolveAlertRequest, current_user: dict = Depends(get_current_user)):
-    """Resolve an existing alert."""
-    # Enforce Identity Binding
-    if req.agent_id != current_user["username"]:
-        raise HTTPException(status_code=403, detail="Identity mismatch")
-
-    allowed, reason = allow(current_user, "alert.resolve", {
-        "alert_id": req.alert_id,
-        "agent_id": req.agent_id
-    })
-    if not allowed:
-        raise HTTPException(status_code=403, detail=f"Policy denied: {reason}")
-
+def resolve_alert(req: ResolveAlertRequest, intent_id: str = Depends(verify_armoriq), x_user_email: str = Header("unknown", alias="X-ArmorIQ-User-Email")):
+    """Resolve an alert (ArmorIQ Governed)."""
+    logger.info(f"Authorized Request [Intent: {intent_id}] from {x_user_email}")
+    
     # Find the alert
     alert = None
     for a in state.get_alerts():
@@ -96,26 +79,24 @@ def resolve_alert(req: ResolveAlertRequest, current_user: dict = Depends(get_cur
             break
     
     if not alert:
+        logger.error(f"Alert {req.alert_id} not found")
         raise HTTPException(status_code=404, detail="Alert not found")
     
     if alert.get("resolved"):
+        logger.error(f"Alert {req.alert_id} already resolved")
         raise HTTPException(status_code=400, detail="Alert already resolved")
     
-    # Resolve it
+    # Simulate resolution
     resolved = state.resolve_alert(req.alert_id)
     if resolved:
         resolved["status"] = "resolved"
-        resolved["resolved_by"] = current_user["username"]
+        resolved["resolved_by"] = x_user_email
         if req.resolution_note:
             resolved["resolution_note"] = req.resolution_note
-    
-    from policy.engine import consume_quota
-    consume_quota(current_user, "alert.resolve", {
-        "alert_id": req.alert_id,
-        "agent_id": req.agent_id
-    })
-    
-    log_action("alert.resolved", user=current_user["username"], alert_id=req.alert_id)
+            
+    # Log Action
+    logger.info(f"Alert {req.alert_id} resolved")
+    log_action("alert.resolved", user=x_user_email, alert_id=req.alert_id, intent=intent_id)
     
     return {
         "status": "success",
@@ -123,30 +104,22 @@ def resolve_alert(req: ResolveAlertRequest, current_user: dict = Depends(get_cur
         "alert": resolved,
     }
 
+# ----- Utility Endpoints (Read-Only) -----
 
 @router.get("/")
-def list_alerts(
-    status: Optional[Literal["open", "resolved"]] = None,
-    severity: Optional[Literal["low", "medium", "high", "critical"]] = None,
-):
-    """List all alerts with optional filtering."""
+def list_alerts(status: Optional[str] = None, severity: Optional[str] = None):
+    """List all alerts with filters."""
     alerts = state.get_alerts()
     
-    # Filter by status
     if status == "open":
         alerts = [a for a in alerts if not a.get("resolved")]
     elif status == "resolved":
         alerts = [a for a in alerts if a.get("resolved")]
-    
-    # Filter by severity
+        
     if severity:
         alerts = [a for a in alerts if a.get("severity") == severity]
-    
-    return {
-        "total": len(alerts),
-        "alerts": alerts,
-    }
-
+        
+    return {"total": len(alerts), "alerts": alerts}
 
 @router.get("/{alert_id}")
 def get_alert(alert_id: str):

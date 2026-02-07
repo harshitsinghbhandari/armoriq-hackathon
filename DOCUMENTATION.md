@@ -1,137 +1,119 @@
-# System Documentation
+# System Internal Documentation
 
-This document provides a detailed technical overview of the ArmorIQ system for engineering and development purposes.
+**Audience:** Project Contributors, Maintainers, and Reviewers.
+**Goal:** Technical deep-dive into the Autonomous Sysadmin Agent architecture and ArmorIQ governance integration.
 
-## Current System Status
-The system is currently in a **functional prototype** state. The core mechanics of agent authentication, state retrieval, policy enforcement, and autonomous action execution are implemented and tested end-to-end.
+## 1. System Overview
 
-## Architecture Breakdown
+This system allows an AI agent to autonomously manage infrastructure while being strictly governed by the **ArmorIQ** policy engine. Unlike standard "human-in-the-loop" systems, this implements **"policy-in-the-loop"** enforcement where the infrastructure itself (MCP) rejects any action not accompanied by a valid cryptographic intent token from ArmorIQ.
 
-### 1. Gemini Agent (`agent_basic.py`)
-- **Role:** The "brain" of the system.
-- **Function:**
-    - Authenticates against Keycloak to obtain a bearer token.
-    - Polls the `infra/list` and `alerts/` endpoints to build a context window.
-    - Uses `gemini-2.5-flash` to reason about the state and generate a structured JSON plan.
-    - Executes actions (`infra.restart`, `alert.resolve`) via the MCP API.
+### High-Level Data Flow
 
-### 2. Keycloak Auth (`auth.py` & External Service)
-- **Role:** Identity Provider (IdP) and Access Control.
-- **Architecture:**
-    - **Realm:** `hackathon` (Tenant isolation).
-    - **Client:** `mcp-client` (OIDC client for the agent).
-    - **Users:** `admin_agent` (Service account-like user).
-- **Function:**
-    - Issues OpenID Connect (OIDC) tokens via the `password` grant type.
-    - Validates JWT tokens signed by the realm's private key.
-    - Enforces authentication for all API endpoints.
-- **Integration:**
-    - The Agent requests a token from `http://localhost:8080/realms/hackathon/protocol/openid-connect/token`.
-    - The MCP Server verifies the token using the realm's public key (fetched from JWKS endpoint).
+The system operates in a continuous control loop:
 
-### 3. Secure MCP Services (`mcp/*.py`)
-- **Role:** The "hands" of the system (Model Context Protocol server).
-- **Function:**
-    - Exposes strict API endpoints for infrastructure management.
-    - Validates all incoming requests against the policy engine.
-    - Logs all activities to the audit log.
+1.  **Inject Fault:** `insert_issues.py` creates alerts (e.g., service stop, high CPU) in MCP.
+2.  **Sense:** `orchestrator` polls MCP state and feeds it to the `agent`.
+3.  **Plan:** `agent` (Ollama) analyzes the state and outputs a JSON plan (`infra.restart`).
+4.  **Govern:** `orchestrator` submits the plan to **ArmorIQ** (`capture_plan`).
+    *   ArmorIQ checks policies.
+    *   If approved, it returns an **Intent Token**.
+5.  **Act:** `orchestrator` calls the `mcp` endpoint (`/restart`) with the **Intent Token**.
+6.  **Enforce:** `mcp` verifies the token (and its signature/claims) before executing.
 
-### 4. Policy Engine (`policy/engine.py`)
-- **Role:** The "conscience" of the system.
-- **Function:**
-    - Evaluate every action request *before* execution.
-    - Enforces rules like "Agents can only restart services if they own the alert" (future implementation).
-    - Currently implements basic allow/deny logic based on role and resource type.
+## 2. Module Responsibilities
 
-### 5. Simulator (`insert_issues.py`)
-- **Role:** Chaos Monkey.
-- **Function:**
-    - Injects synthetic failures (alerts, service degradations) into the system.
-    - Used to test the agent's recovery capabilities.
+### `agent/`
+*   **Role:** Intelligence Layer.
+*   **Tech:** FastAPI, Ollama (local LLM).
+*   **Key Files:**
+    *   `server.py`: Exposes `/run` endpoint. Accepts prompt, returns JSON plan.
+    *   `llm.py`: Handles Ollama API communication and schema enforcement (ensures JSON output).
+    *   `prompts.py`: System prompts defining the agent's persona and available tools.
 
-## Realm Management & Setup
+### `armoriq/`
+*   **Role:** Governance Gateway.
+*   **Tech:** ArmorIQ SDK (or Mock).
+*   **Key Files:**
+    *   `client.py`: Singleton wrapper around the ArmorIQ SDK. Handles the lifecycle of plan capture and token retrieval.
+    *   **Mock Mode:** If `USE_MOCK_ARMORIQ=true`, it bypasses the real API and issues "mock-intent-tokens".
 
-### Keycloak Setup Script (`keycloak/setup_keycloak.sh`)
-This script automates the bootstrapping of the local Keycloak environment.
+### `mcp/` (Mini Cloud Platform)
+*   **Role:** Infrastructure Simulator & Enforcement Point.
+*   **Tech:** FastAPI.
+*   **Key Files:**
+    *   `infra.py`: Service management endpoints (`/mcp/infra/restart`). **Protected**.
+    *   `alerts.py`: Alert management (`/mcp/alerts/resolve`). **Protected**.
+    *   `main.py`: Entry point. Mounts routers.
+*   **Security:** Critical endpoints depend on `verify_armoriq`, which checks for `X-ArmorIQ-Intent-ID`.
 
-*   **Usage:** `./keycloak/setup_keycloak.sh <path_to_keycloak_dir>`
-*   **What it does:**
-    1.  Starts Keycloak in import mode.
-    2.  Imports `keycloak/hackathon-realm.json`.
-    3.  Starts Keycloak in development mode (`start-dev`).
+### `orchestrator/`
+*   **Role:** The "Hands" (Runner).
+*   **Tech:** Python script (`runner.py`).
+*   **Function:**
+    *   Connects all components.
+    *   Polls state -> Calls Agent -> Calls ArmorIQ -> Calls MCP.
+    *   **Stateless:** Does not maintain internal state between cycles.
 
-### Realm Export/Import Workflow
-To share configuration changes (e.g., new clients, roles):
+## 3. ArmorIQ Lifecycle
 
-1.  **Export:**
-    ```bash
-    # Stop Keycloak first
-    $KEYCLOAK_HOME/bin/kc.sh export --dir ./keycloak_export --realm hackathon --users realm_file
-    # Overwrite the project file with the new export
-    mv ./keycloak_export/hackathon-realm.json ./keycloak/hackathon-realm.json
-    ```
-2.  **Commit:** Check in the updated `hackathon-realm.json` to git.
-3.  **Import:** Teammates run `setup_keycloak.sh` to get the changes.
+The governance flow is strict. The orchestrator must follow this sequence for *every* mutating action:
 
-## Troubleshooting
+1.  **`capture_plan(llm, prompt, plan)`**
+    *   Sends the raw prompt (context) and the agent's proposed JSON plan to ArmorIQ.
+    *   ArmorIQ logs this attempt.
+2.  **`get_intent_token(plan_id)`**
+    *   ArmorIQ evaluates the plan against active Policies.
+    *   **Result:** returns a signed JWT-like **Intent Token** binding the specific action (`infra.restart`) and parameters (`service_id=web`) to this approval.
+3.  **`invoke(mcp, action, intent_token, ...)`**
+    *   The orchestrator passes this token to the MCP.
+    *   The MCP verifies the token is valid and matches the requested action.
 
-### Common Setup Errors
+## 4. Mock vs. Real ArmorIQ
 
-| Error | Cause | Fix |
-| :--- | :--- | :--- |
-| `connection refused` on port 8080 | Keycloak not running | Run `setup_keycloak.sh` or checks logs. |
-| `401 Unauthorized` (Agent) | Invalid credentials in `.env` | Verify `MCP_USER` and `MCP_PASSWORD` against Keycloak users. |
-| `Keycloak connection failed` (MCP) | MCP cannot reach Keycloak | Ensure Keycloak is on `localhost:8080` (default). |
-| `Invalid token signature` | Realm keys rotated/mismatch | Restart Keycloak with the correct `hackathon-realm.json`. |
+To facilitate local development without hitting the production ArmorIQ API, we support a **Mock Mode**.
 
-### Agent "Stuck"
-If the agent loops without taking action:
-1.  Check `audit.log` for policy denials.
-2.  Verify the prompt in `agent_basic.py` isn't hitting safety filters (rare).
-3.  Restart the MCP server to clear transient state.
+*   **Enable:** Set `USE_MOCK_ARMORIQ=true` in `.env` or if API keys are missing.
+*   **Behavior:**
+    *   `capture_plan`: Returns a dummy ID.
+    *   `get_intent_token`: Returns "mock-intent-token-xyz".
+    *   `invoke`: Calls MCP directly (MCP must be configured to accept mock tokens, or simply validates presence).
+*   **Warning:** Mock mode provides **NO** real security. Do not use in production.
 
-## Execution Flow (Step-by-Step)
+## 5. Policy Management
 
-1.  **Issue Injection:** `insert_issues.py` POSTs a new alert to `mcp/alerts/create`.
-2.  **State Polling:** `agent_basic.py` loops, requesting `mcp/alerts/` (GET) with its bearer token.
-3.  **Reasoning:** The agent constructs a prompt with the current alerts and sends it to Gemini.
-4.  **Decision:** Gemini returns a JSON object: `{"action": "infra.restart", "params": {"service_id": "web-01"}}`.
-5.  **Action Request:** The agent POSTs to `mcp/infra/restart` with the bearer token.
-6.  **Policy Check:** The MCP server interception layer calls `policy.check(action="restart", user="admin_agent")`.
-7.  **Execution:** If approved, the service is restarted.
-8.  **Audit:** The action and its result are written to `audit.log`.
+*   **Real Mode:** Policies are defined in the ArmorIQ SaaS Dashboard.
+*   **Local/Mock:** Simple policy logic is mimicked in `policy/engine.py` (though currently largely bypassed or used by the local mock verification if enabled).
+*   **Enforcement:** The ultimate enforcement is the **existence** of a valid token. If ArmorIQ declined the plan, no token exists, and MCP rejects the request.
 
-## Security Model
-*   **Zero Trust:** No action is trusted implicitly; all must carry a valid token.
-*   **Least Privilege:** The agent account should only have the roles necessary for its function (e.g., `operator`, not `admin`).
-*   **Auditability:** Non-repudiation of actions via signed tokens and immutable logs.
+## 6. How to Add New Tools
 
-### Security Notes (What NOT to Commit)
-*   **NEVER commit `.env` files.** They contain API keys and passwords.
-*   **NEVER commit Keycloak master realm exports.** Only export the `hackathon` realm.
-*   **Avoid committing real user data.** The `hackathon-realm.json` should only contain test users.
+1.  **MCP:** Implement the endpoint in `mcp/` (e.g., `mcp/data.py: /backup`). Ensure it asks for `X-ArmorIQ-Intent-ID`.
+2.  **Agent:** Update `agent/prompts.py` to tell the LLM about the new tool (`data.backup`).
+3.  **Policy:** Update ArmorIQ rules to allow this action for the agent.
 
-## Governance Model
-*   **Policy as Code:** Governance rules are defined in Python, not vague documents.
-*   **Centralized Enforcement:** The policy engine is the single source of truth for authorization.
+## 7. Debugging Failures
 
-## Integration Points (ArmorIQ)
-*   **SDK:** The ArmorIQ SDK will replace the current manual `policy/engine.py` logic.
-*   **Dashboard:** Future integration will visualize the audit log and policy decisions.
+### Logs
+*   **Agent:** `agent_server.log`. Check here if the LLM is outputting invalid JSON.
+*   **MCP:** `mcp_server.log`. Check here for `401 Unauthorized` (Token issues) or `500 Server Error`.
+*   **Orchestrator:** Stdout. usage: `tail -f agent_server.log`.
 
-## Known Limitations
-*   **No Persistent State:** Alerts and services are in-memory (reset on restart).
-*   **Single Agent:** Currently designed for a single active agent process.
-*   **Basic Policy:** The current policy engine is a stub and needs expansion.
+### Common Failure Modes
+*   **"Unauthorized: ArmorIQ Intent Required"**: The orchestrator tried to call MCP directly without going through ArmorIQ first.
+*   **"Identity Mismatch"**: The agent ID in the plan doesn't match the authenticated user.
+*   **"Service not found"**: The agent hallucinated a service ID.
 
-## Technical Debt
-*   Hardcoded credentials in `.env` (should use secrets management).
-*   Lack of unit tests for edge cases in the policy engine.
-*   `agent_basic.py` uses a simple loop; needs backoff and better error handling.
+## 8. Audit & Security Goals
 
-## Development Setup
-See `README.md` for standard setup.
+*   **Audit Log:** MCP logs every action to `audit.log`. This file is the "proof of work" for compliance.
+*   **Assumptions:**
+    *   The `agent` is untrusted (can hallucinate or be jailbroken).
+    *   The `orchestrator` is dumb (just passes messages).
+    *   **ArmorIQ** is the Root of Trust.
+    *   **MCP** is the Policy Enforcement Point (PEP).
 
-### Warnings (Do Not Break)
-*   **Auth Flow:** Do not bypass the `get_current_user` dependency in FastAPI; it breaks the security model.
-*   **Audit Logging:** Do not remove the logging calls in the MCP endpoints; they are required for governance.
+## 9. Common Mistakes
+
+*   **Modifying `.env` but not restarting:** Services load config on startup.
+*   **Changing Prompts without testing:** The LLM might stop producing valid JSON.
+*   **Forgetting `verify_armoriq`:** If you add an MCP endpoint without this dependency, the agent can bypass governance. **Always add authentication dependencies.**
