@@ -188,6 +188,13 @@ class SystemState:
     def get_alerts(self) -> list:
         return self.alerts
     
+    def get_alert(self, alert_id: str) -> Optional[dict]:
+        """Get a specific alert by ID."""
+        for alert in self.alerts:
+            if alert["id"] == alert_id:
+                return alert
+        return None
+
     def add_alert(self, alert: dict) -> dict:
         with self._lock:
             alert["id"] = f"alert_{len(self.alerts) + 1}"

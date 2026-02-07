@@ -13,11 +13,18 @@ MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 
 def extract_json(text: str) -> str:
     """Extract first JSON object from model output."""
-    text = text.replace("```json", "").replace("```", "").strip()
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
+    # Remove markdown blocks if present
+    text = re.sub(r"```json\s*", "", text)
+    text = re.sub(r"```\s*", "", text)
+
+    # Find the first { and the last }
+    start = text.find('{')
+    end = text.rfind('}')
+
+    if start == -1 or end == -1 or end < start:
         raise ValueError("No JSON object found in output")
-    return match.group(0)
+
+    return text[start:end+1]
 
 def generate_plan(prompt: str) -> dict:
     """
